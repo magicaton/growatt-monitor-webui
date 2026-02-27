@@ -1,0 +1,27 @@
+# Growatt Monitor Config
+# Copy this file to config.yaml and adjust values as needed.
+
+logging:
+  console_level: "INFO"    # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file_level: "WARNING"
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  storage_secret: "secret_key_1234567890"
+
+modbus:
+  com_port: "auto"
+  baudrate: 9600
+  slave_id: 1
+  update_interval: 3.0     # seconds between reads
+  max_chunk_size: 40       # max registers per Modbus read
+  opt_max_gap: 20          # max gap between addresses in optimized chunk
+
+inspector:
+  # Each chunk is [start_address, count]
+  inspector_chunks: [[0, 40], [40, 40], [80, 40]]
+
+ui:
+  show_fs_btn: false  # Show fullscreen toggle button by default (?fs=1 to enable per-browser)
+  show_dev_btns: true        # Show inspector/logs buttons by default (?dev=1 to enable per-browser)

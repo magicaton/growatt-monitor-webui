@@ -1,0 +1,78 @@
+# Dashboard Configuration
+
+widgets:
+
+  # Energy Flow Stack
+  - type: EnergyStackWidget
+    title: Load Source
+    solar_w_id: 6
+    grid_w_id: 37
+    batt_v_id: 17
+    batt_dis_i_id: 84
+  
+  # Battery SOC Strip
+  - {type: StripCard, reg_id: 18, title: Battery SOC, mode: high_good, unit: "%", scale: 1, star: true}
+  
+  # Load Percentage Strip
+  - {type: StripCard, reg_id: 27, title: Load Percentage, mode: low_good, unit: "%", scale: 0.1, star: true}
+
+  # System Status
+  - {type: RegisterCard, reg_id: 0, title: System Status, unit: "", scale: 1}
+  
+  # Grid Voltage
+  - {type: RegisterCard, reg_id: 20, title: Grid Voltage, unit: V, scale: 0.1}
+  
+  # Grid Power
+  - {type: RegisterCard, reg_id: 37, title: Grid Power, unit: W, scale: 0.1}
+  
+  # Grid Frequency
+  - {type: RegisterCard, reg_id: 21, title: Grid Frequency, unit: Hz, scale: 0.01}
+  
+  # Solar Voltage
+  - {type: RegisterCard, reg_id: 2, title: Solar Voltage, unit: V, scale: 0.1}
+  
+  # Solar Power
+  - {type: RegisterCard, reg_id: 6, title: Solar Power, unit: W, scale: 0.1}
+  
+  # Battery Voltage
+  - {type: RegisterCard, reg_id: 17, title: Battery Voltage, unit: V, scale: 0.01}
+  
+  # Battery Charge Current (calculated)
+  - type: MathCard
+    title: Battery Charge Current
+    variables: [83, 84]
+    formula: "v[83] - v[84]"
+    unit: A
+    scale: 1.0
+    star: true
+  
+  # Battery Charge Power (calculated)
+  - type: MathCard
+    title: Battery Charge Power
+    variables: [17, 83, 84]
+    formula: "v[17] * (v[83] - v[84])"
+    unit: W
+    scale: 1.0
+  
+  # Output Voltage
+  - {type: RegisterCard, reg_id: 22, title: Output Voltage, unit: V, scale: 0.1, star: true}
+  
+  # Output Current
+  - {type: RegisterCard, reg_id: 34, title: Output Current, unit: A, scale: 0.1}
+  
+  # Load Power
+  - {type: RegisterCard, reg_id: 10, title: Load Power, name: "Load Power (Active)", unit: W, scale: 0.1, star: true}
+  
+  # Load Power (Apparent)
+  - {type: RegisterCard, reg_id: 12, title: "Load Power (Appr.)", unit: VA, scale: 0.1}
+  
+  # Output Frequency
+  - {type: RegisterCard, reg_id: 23, title: Output Frequency, unit: Hz, scale: 0.01}
+  
+  # Inverter Temperature
+  - {type: RegisterCard, reg_id: 25, title: Inverter Temp, unit: "°C", scale: 0.1}
+
+# Metadata-only registers (for inspector)
+registers:
+  - {reg_id: 83, name: "Batt. Charge Current", unit: A, scale: 0.1}
+  - {reg_id: 84, name: "Batt. Discharge Current", unit: A, scale: 0.1}

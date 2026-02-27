@@ -1,0 +1,18 @@
+# Project specific configurations
+config.yaml
+dashboard.yaml
+
+!config_templates/*
+
+# Logs
+*.log
+
+# Virtual environment directories
+venv/
+.venv/
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
