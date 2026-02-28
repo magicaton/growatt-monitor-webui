@@ -212,10 +212,12 @@ async def background_worker():
         # No clients -> close port and sleep
         total_clients = state.dashboard_clients_count + state.inspector_clients_count
         if total_clients == 0:
-            if state.serial_obj and state.serial_obj.is_open:
-                logging.info("No active clients, closing serial port")
-                state.serial_obj.close()
-                state.serial_obj = None
+            with state_lock:
+                if state.serial_obj and state.serial_obj.is_open:
+                    logging.info("No active clients, closing serial port")
+                    state.serial_obj.close()
+                    state.serial_obj = None
+                    state.latest_data.clear()
             await asyncio.sleep(1)
             continue
 
@@ -238,7 +240,8 @@ async def background_worker():
                 ser.reset_input_buffer()
 
                 if state.is_running:
-                    state.serial_obj = ser
+                    with state_lock:
+                        state.serial_obj = ser
                     logging.info("Port %s opened (baud=%d)", target_port, conf.baudrate)
                 else:
                     ser.close()
@@ -477,25 +480,6 @@ async def main_page(client: Client, request: Request):
 
     dashboard_timer = ui.timer(1.0, update_view)
     client.on_disconnect(lambda: dashboard_timer.deactivate())
-
-    # Wait for WebSocket and register client
-    await client.connected()
-
-    with state_lock:
-        state.dashboard_clients_count += 1
-        state.active_connections[client.id] = {
-            "ip": request.client.host if request.client else "Unknown",
-            "page": "Dashboard",
-            "connected_at": datetime.now(),
-            "last_seen": datetime.now(),
-        }
-        logging.info(
-            "Client %s connected (Dashboard) from %s. Active: %d, Inspector: %d",
-            client.id,
-            state.active_connections[client.id]["ip"],
-            state.dashboard_clients_count,
-            state.inspector_clients_count,
-        )
 
     heartbeat_ref["timer"] = setup_heartbeat(client, "Dashboard", request)
 
