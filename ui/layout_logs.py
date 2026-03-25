@@ -204,7 +204,7 @@ def create_logs_page(client, state):
             # --- LOGS TAB PANEL ---
             with ui.tab_panel(logs_tab).classes("h-full flex flex-col p-0"):
                 # Level filter buttons
-                filter_state = {"min_level": "INFO"}
+                filter_min_level = "INFO"
                 filter_buttons = {}
 
                 # Colors matching LOG_LEVEL_BADGE_STYLES (dark mode palette)
@@ -233,7 +233,7 @@ def create_logs_page(client, state):
                         filter_buttons[level_key] = btn
 
                 def update_filter_buttons():
-                    active = filter_state["min_level"]
+                    active = filter_min_level
                     for level_key, btn in filter_buttons.items():
                         bg_tpl, color_on, color_off = filter_btn_styles[level_key]
                         if level_key == active:
@@ -283,13 +283,14 @@ def create_logs_page(client, state):
         pending_logs = deque()
 
         def passes_filter(entry: dict) -> bool:
-            min_lvl = filter_state["min_level"]
+            min_lvl = filter_min_level
             if min_lvl == "ALL":
                 return True
             return LEVEL_PRIORITY.get(entry.get("level", "INFO"), 1) >= LEVEL_PRIORITY.get(min_lvl, 1)
 
         def apply_filter(level_key: str):
-            filter_state["min_level"] = level_key
+            nonlocal filter_min_level
+            filter_min_level = level_key
             update_filter_buttons()
             reload_logs()
 
@@ -565,7 +566,7 @@ def create_logs_page(client, state):
             log_process_timer = ui.timer(0.15, process_pending_logs)
 
         _conn_rows = {}
-        _conn_client_set = {"ids": frozenset()}
+        _conn_client_set_ids = frozenset()
 
         def _build_connections_full(active_conns, now):
             row_classes = "w-full p-2 gap-2 no-wrap items-center"
@@ -613,6 +614,7 @@ def create_logs_page(client, state):
                     _conn_rows[cid] = {"duration": dur_lbl, "last_seen": seen_lbl}
 
         def update_connections():
+            nonlocal _conn_client_set_ids
             if not client.has_socket_connection:
                 return
 
@@ -621,8 +623,8 @@ def create_logs_page(client, state):
                 current_ids = frozenset(active_conns.keys())
                 now = datetime.now()
 
-                if current_ids != _conn_client_set["ids"]:
-                    _conn_client_set["ids"] = current_ids
+                if current_ids != _conn_client_set_ids:
+                    _conn_client_set_ids = current_ids
                     _build_connections_full(active_conns, now)
                 else:
                     for cid, conn in active_conns.items():

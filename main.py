@@ -158,10 +158,10 @@ def unregister_client(client_id):
             )
 
 def setup_heartbeat(client, page_name, request):
-    timer_active = {"value": True}  # Mutable dict — closures can't rebind outer locals
+    timer_active = True
 
     async def heartbeat():
-        if not timer_active["value"] or not client.has_socket_connection:
+        if not timer_active or not client.has_socket_connection:
             return
         try:
             await client.run_javascript("true", timeout=1.5)
@@ -172,7 +172,8 @@ def setup_heartbeat(client, page_name, request):
     heartbeat_timer = ui.timer(2.0, heartbeat)
 
     def on_disconnect():
-        timer_active["value"] = False
+        nonlocal timer_active
+        timer_active = False
         heartbeat_timer.deactivate()
 
         # Delayed removal: if this is a Wi-Fi change, JS will reload the page
@@ -344,10 +345,10 @@ async def main_page(client: Client, request: Request):
     dev = app.storage.browser.get("dev", conf.show_dev_btns)
     fullscreen = app.storage.browser.get("fs", conf.show_fs_btn)
 
-    show_all = {"value": request.cookies.get("gw_show_all") == "1"}  # Cookie toggle for starred-only filter
+    show_all = request.cookies.get("gw_show_all") == "1"  # Cookie toggle for starred-only filter
     active_widgets: list[layout.BaseWidget] = []
 
-    heartbeat_ref: dict = {"timer": None}
+    heartbeat_timer = None
 
     # --- HEADER ---
     with ui.header().classes("bg-blue-900 items-center shadow-lg"):
@@ -360,16 +361,17 @@ async def main_page(client: Client, request: Request):
         toggle_tooltip = None
 
         def update_toggle_btn():
-            icon = "star_border" if show_all["value"] else "star"
+            icon = "star_border" if show_all else "star"
             toggle_btn.props(f"icon={icon}")
             if toggle_tooltip:
-                toggle_tooltip.text = "Show starred only" if show_all["value"] else "Show all"
+                toggle_tooltip.text = "Show starred only" if show_all else "Show all"
             toggle_btn.update()
 
         def toggle_view():
-            show_all["value"] = not show_all["value"]
+            nonlocal show_all
+            show_all = not show_all
 
-            val = "1" if show_all["value"] else "0"
+            val = "1" if show_all else "0"
             ui.run_javascript(f'document.cookie="gw_show_all={val};path=/;max-age=315360000;SameSite=Lax"')
             update_toggle_btn()
             rebuild_grid()
@@ -408,16 +410,17 @@ async def main_page(client: Client, request: Request):
 
 
             # --- PAUSE BUTTON ---
-            is_paused = {"value": False}
+            is_paused = False
             pause_tooltip = None
 
             def toggle_pause():
-                if is_paused["value"]:
-                    is_paused["value"] = False
+                nonlocal is_paused
+                if is_paused:
+                    is_paused = False
                     register_client_activity(client, "Dashboard", request)
 
-                    if heartbeat_ref["timer"]:
-                        heartbeat_ref["timer"].activate()
+                    if heartbeat_timer:
+                        heartbeat_timer.activate()
 
                     dashboard_timer.activate()
 
@@ -427,11 +430,11 @@ async def main_page(client: Client, request: Request):
                     logging.debug("Client %s resumed updates", client.id)
                     ui.notify("Updates resumed", type="positive", position="top")
                 else:
-                    is_paused["value"] = True
+                    is_paused = True
                     dashboard_timer.deactivate()
 
-                    if heartbeat_ref["timer"]:
-                        heartbeat_ref["timer"].deactivate()
+                    if heartbeat_timer:
+                        heartbeat_timer.deactivate()
 
                     unregister_client(client.id)
 
@@ -461,7 +464,7 @@ async def main_page(client: Client, request: Request):
             ):
                 page_widgets = create_widgets_from_config()
                 grid_widgets = layout.build_interface(
-                    page_widgets, show_all=show_all["value"]
+                    page_widgets, show_all=show_all
                 )
                 active_widgets.extend(grid_widgets)
 
@@ -481,7 +484,7 @@ async def main_page(client: Client, request: Request):
     dashboard_timer = ui.timer(1.0, update_view)
     client.on_disconnect(lambda: dashboard_timer.deactivate())
 
-    heartbeat_ref["timer"] = setup_heartbeat(client, "Dashboard", request)
+    heartbeat_timer = setup_heartbeat(client, "Dashboard", request)
 
 
 # --- INSPECTOR PAGE ---
