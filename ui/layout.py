@@ -368,6 +368,101 @@ def build_interface(
     return active_widgets
 
 
+def get_secondary_page_css() -> str:
+    return '''
+        .inspector-scroll { max-width: 100%; overflow-x: auto; }
+        .inspector-table { min-width: 560px; }
+        .inspector-table th, .inspector-table td:not(:last-child) { white-space: nowrap; }
+        .inspector-table td:last-child { min-width: 160px; }
+        .logs-header { height: 66px; flex-wrap: nowrap; }
+        .logs-shell { height: calc(100dvh - 74px); min-height: 0; }
+        .logs-shell .q-tab-panels, .logs-shell .q-tab-panel { min-height: 0; }
+        .connections-scroll { overflow: auto; }
+        .connections-table { min-width: 440px; }
+        @media (min-width: 640px) {
+            .inspector-container { max-width: 1280px; margin-inline: auto; }
+        }
+        @media (max-width: 639px) {
+            .secondary-header { padding: 10px 12px; gap: 8px; flex-wrap: nowrap; }
+            .secondary-title { font-size: 18px; line-height: 24px; min-width: 0; }
+            .secondary-header > .q-icon { font-size: 24px !important; }
+            .secondary-header .q-btn { min-width: 44px; min-height: 44px; }
+            .secondary-actions { flex-shrink: 0; }
+            .nicegui-content:has(.inspector-container) { padding: 12px; }
+            .inspector-container { padding: 0; }
+            .inspector-table { font-size: 13px; }
+            .logs-header { height: 64px; }
+            .logs-shell { height: calc(100dvh - 72px); gap: 8px; }
+            .logs-tabs .q-tab { padding: 0 10px; min-height: 44px; }
+            .logs-tabs .q-tab__label { font-size: 13px; }
+            .logs-filters { gap: 4px; flex-wrap: nowrap; }
+            .logs-filters .q-btn { padding: 0 8px; min-height: 36px; }
+            .log-entry { min-width: 0; width: 100%; flex-wrap: wrap; font-size: 13px; }
+            .log-message { width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+            .connections-table { font-size: 13px; }
+        }
+    '''
+
+
+def get_dashboard_css() -> str:
+    return r'''
+        .dashboard-grid > .q-card { min-width: 0; }
+        .dashboard-container { max-width: 1600px; margin-inline: auto; }
+        @media (min-width: 1536px) {
+            .dashboard-grid .text-2xl { font-size: 28px; line-height: 36px; }
+        }
+        @media (min-width: 640px) {
+            .dashboard-grid .uppercase {
+                text-transform: none;
+                letter-spacing: normal;
+                font-size: 14px;
+                line-height: 20px;
+                font-weight: 500;
+            }
+        }
+        @media (min-width: 1920px) {
+            .dashboard-grid { gap: 20px; }
+            .dashboard-grid > .q-card { padding: 20px; gap: 20px; }
+            .dashboard-grid .text-xs { font-size: 14px; line-height: 20px; }
+            .dashboard-grid .uppercase,
+            .dashboard-grid .text-sm { font-size: 16px; line-height: 24px; }
+            .dashboard-grid .text-2xl { font-size: 32px; line-height: 40px; }
+            .dashboard-grid [class~="text-[10px]"] { font-size: 12px; line-height: 16px; }
+            .dashboard-grid .h-4 { height: 20px; }
+            .dashboard-grid .h-8 { height: 40px; }
+        }
+        @media (max-width: 639px) {
+            .nicegui-content:has(.dashboard-container) { padding: 12px; }
+            .dashboard-container { padding: 0; }
+            .dashboard-grid { gap: 10px; }
+            .dashboard-grid > .q-card { padding: 12px; gap: 8px; }
+            .dashboard-grid .uppercase {
+                text-transform: none;
+                letter-spacing: normal;
+                font-size: 13px;
+                line-height: 18px;
+                font-weight: 500;
+                overflow-wrap: anywhere;
+            }
+            .dashboard-grid .text-2xl {
+                font-size: 24px;
+                line-height: 30px;
+                overflow-wrap: anywhere;
+            }
+            .dashboard-grid [class~="text-[10px]"] { font-size: 12px; }
+            .dashboard-header { padding: 10px 12px; gap: 8px; flex-wrap: nowrap; }
+            .dashboard-title { font-size: 18px; line-height: 24px; min-width: 0; }
+            .dashboard-actions { flex-shrink: 0; }
+            .dashboard-actions > .q-btn { min-width: 44px; min-height: 44px; }
+            .dashboard-header > .q-icon { font-size: 24px !important; }
+        }
+        @media (max-width: 339px) {
+            .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
+            .dashboard-grid > .q-card { grid-column: span 1 / span 1; }
+        }
+    '''
+
+
 def get_fill_css() -> str:
     # Cards with --fill-color CSS vars get a horizontal gradient fill.
     return """

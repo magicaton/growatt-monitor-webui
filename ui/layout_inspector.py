@@ -1,23 +1,25 @@
 from nicegui import ui, Client
 
 from core.dashboard_config import get_config
+from ui.layout import get_secondary_page_css
 
 
 def create_inspector_page(client: Client, state) -> None:
     # Auto dark mode
     ui.add_css(':root { color-scheme: light dark; }')
+    ui.add_css(get_secondary_page_css())
     
     ui.colors(primary='#d45858')
     
-    with ui.header().classes("bg-red-900 items-center shadow-lg"):
+    with ui.header().classes("secondary-header bg-red-900 items-center shadow-lg"):
         ui.icon("manage_search", size="md", color="yellow-400")
-        ui.label("Growatt Register Inspector").classes("text-xl font-bold text-white")
+        ui.label("Register Inspector").classes("secondary-title text-xl font-bold text-white")
         
         ui.element("div").classes("flex-grow")
         target_url = "/"
-        ui.button(icon="arrow_back", on_click=lambda: ui.navigate.to(target_url)).props("flat color=white")
+        ui.button(icon="arrow_back", on_click=lambda: ui.navigate.to(target_url)).props('flat color=white dense round aria-label="Back to dashboard"')
     
-    with ui.element('div').classes('w-full p-4'):
+    with ui.element('div').classes('inspector-container w-full p-4'):
         table_container = ui.element('div').classes('w-full')
         
         ui_cells = {}  # {addr: {'raw': el, 'x01': el, 'x001': el, 'named': el}}
@@ -38,8 +40,8 @@ def create_inspector_page(client: Client, state) -> None:
             
             with table_container:
                 # Columns: Index, Raw, x0.1, x0.01, Named Value
-                with ui.element('div').classes('overflow-x-auto'):
-                    with ui.element('table').classes('w-full border-collapse text-sm'):
+                with ui.element('div').classes('inspector-scroll').props('tabindex=0 aria-label="Registers, scroll horizontally for all columns"'):
+                    with ui.element('table').classes('inspector-table w-full border-collapse text-sm'):
                         with ui.element('thead'):
                             with ui.element('tr').classes('bg-gray-200 dark:bg-gray-700'):
                                 for header in ["Reg #", "Raw", "×0.1", "×0.01", "Named Value"]:

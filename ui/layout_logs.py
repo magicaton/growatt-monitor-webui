@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from nicegui import ui
+from ui.layout import get_secondary_page_css
 
 # Highlight rules: applied top-down, already-matched text is frozen.
 LOG_HIGHLIGHT_RULES = [
@@ -136,11 +137,12 @@ def render_log_entry(entry: dict) -> str:
 def create_logs_page(client, state):
     # Auto dark mode
     ui.add_css(':root { color-scheme: light dark; }')
+    ui.add_css(get_secondary_page_css())
 
     # --- HEADER ---
-    with ui.header().classes("bg-blue-900 items-center shadow-lg"):
+    with ui.header().classes("secondary-header logs-header bg-blue-900 items-center shadow-lg"):
         ui.icon("article", size="md", color="yellow-400")
-        ui.label("Logs & Connections").classes("text-xl font-bold text-white")
+        ui.label("Logs & Connections").classes("secondary-title text-xl font-bold text-white")
 
         ui.element("div").classes("flex-grow")
 
@@ -171,32 +173,37 @@ def create_logs_page(client, state):
                     ui.button("Shutdown", on_click=do_shutdown).props("color=red")
             dialog.open()
 
-        with ui.row().classes("gap-0 sm:gap-2 flex-nowrap items-center"):
+        with ui.row().classes("secondary-actions gap-0 sm:gap-2 flex-nowrap items-center"):
             ui.button(icon="restart_alt", on_click=restart_service).props(
                 "flat color=orange dense round"
-            ).tooltip("Restart")
+            ).classes('hidden sm:!inline-flex').tooltip("Restart")
 
             ui.button(icon="power_settings_new", on_click=shutdown_service).props(
                 "flat color=red dense round"
-            ).tooltip("Shutdown")
+            ).classes('hidden sm:!inline-flex').tooltip("Shutdown")
+
+            with ui.button(icon='more_vert').props('flat color=white dense round aria-label="Service actions"').classes('sm:!hidden'):
+                with ui.menu():
+                    ui.menu_item('Restart', on_click=restart_service)
+                    ui.menu_item('Shutdown', on_click=shutdown_service)
 
             # Back button (rightmost)
             target_url = "/"
             ui.button(icon="arrow_back", on_click=lambda: ui.navigate.to(target_url)).props(
-                "flat color=white dense round"
+                'flat color=white dense round aria-label="Back to dashboard"'
             )
 
     ui.add_css('body { margin: 0; padding: 0; overflow: hidden; }')
     ui.add_css('.nicegui-content { padding: 0 !important; }')
 
-    # Header ~52px, leave small margin
+    # Match the explicit header height; keep scrolling inside each panel.
     with ui.card().classes(
-        "w-full max-w-6xl mx-auto my-1 p-2 sm:p-4 flex flex-col"
-    ).style("height: calc(100vh - 60px); height: calc(100dvh - 60px)"):
+        "logs-shell w-full max-w-6xl mx-auto my-1 p-2 sm:p-4 flex flex-col"
+    ):
         with ui.row().classes("w-full items-center mb-2"):
-            with ui.tabs().classes("text-lg font-bold").props("dense no-caps") as tabs:
-                logs_tab = ui.tab("logs", label="System Logs", icon="article")
-                conn_tab = ui.tab("connections", label="Active Connections", icon="people")
+            with ui.tabs().classes("logs-tabs w-full text-lg font-bold").props("dense no-caps inline-label") as tabs:
+                logs_tab = ui.tab("logs", label="Logs", icon="article")
+                conn_tab = ui.tab("connections", label="Connections", icon="people")
         
         scroll_bottom_btn = None
 
@@ -222,7 +229,7 @@ def create_logs_page(client, state):
                     ("ERROR", "Error+"),
                 ]
 
-                with ui.row().classes("gap-1.5 px-1 py-1 flex-shrink-0 items-center"):
+                with ui.row().classes("logs-filters gap-1.5 px-1 py-1 flex-shrink-0 items-center"):
                     ui.icon("filter_list", size="xs").classes("text-gray-400")
                     for level_key, label in filter_levels:
                         def make_handler(lk=level_key):
@@ -270,8 +277,8 @@ def create_logs_page(client, state):
                     scroll_bottom_btn.set_visibility(False)
 
             # --- CONNECTIONS TAB PANEL ---
-            with ui.tab_panel(conn_tab).classes("p-0"):
-                conn_container = ui.column().classes("w-full")
+            with ui.tab_panel(conn_tab).classes("connections-scroll p-0"):
+                conn_container = ui.column().classes("connections-table w-full")
 
         log_handler = state.log_handler
         # Sliding window into log_handler.log_buffer:

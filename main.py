@@ -322,6 +322,7 @@ async def main_page(client: Client, request: Request):
     ui.colors(primary="#5898d4")
 
     ui.add_head_html(layout.get_fill_css())
+    ui.add_css(layout.get_dashboard_css())
 
     # Auto-reload page on WebSocket disconnect (handles Wi-Fi changes)
     ui.add_head_html('''
@@ -351,10 +352,10 @@ async def main_page(client: Client, request: Request):
     heartbeat_timer = None
 
     # --- HEADER ---
-    with ui.header().classes("bg-blue-900 items-center shadow-lg"):
+    with ui.header().classes("dashboard-header bg-blue-900 items-center shadow-lg"):
         ui.icon("bolt", size="md", color="yellow-400")
 
-        ui.label("Growatt Monitor").classes("text-xl font-bold text-white")
+        ui.label("Growatt Monitor").classes("dashboard-title text-xl font-bold text-white")
 
         ui.element("div").classes("flex-grow")
 
@@ -377,7 +378,7 @@ async def main_page(client: Client, request: Request):
             rebuild_grid()
 
 
-        with ui.row().classes("gap-0 sm:gap-2 flex-nowrap items-center"):
+        with ui.row().classes("dashboard-actions gap-0 sm:gap-2 flex-nowrap items-center"):
             toggle_btn = ui.button(icon="star", on_click=toggle_view).props("flat color=white dense round")
             with toggle_btn:
                 toggle_tooltip = ui.tooltip("Show all").classes('text-center')
@@ -395,18 +396,18 @@ async def main_page(client: Client, request: Request):
                         document.exitFullscreen();
                     }
                 """),
-                ).props("flat color=white dense round").tooltip("Toggle fullscreen")
+                ).props("flat color=white dense round").classes('hidden sm:!inline-flex').tooltip("Toggle fullscreen")
 
 
             if dev is True:
                 ui.button(
                     icon="manage_search",
                     on_click=lambda: ui.navigate.to("/inspector"),
-                ).props("flat color=white dense round").tooltip("Inspector")
+                ).props("flat color=white dense round").classes('hidden sm:!inline-flex').tooltip("Inspector")
                 ui.button(
                     icon="article",
                     on_click=lambda: ui.navigate.to("/logs"),
-                ).props("flat color=white dense round").tooltip("Logs")
+                ).props("flat color=white dense round").classes('hidden sm:!inline-flex').tooltip("Logs")
 
 
             # --- PAUSE BUTTON ---
@@ -450,9 +451,24 @@ async def main_page(client: Client, request: Request):
             with pause_btn:
                 pause_tooltip = ui.tooltip("Pause").classes('text-center')
 
+            if dev or fullscreen:
+                with ui.button(icon='more_vert').props('flat color=white dense round aria-label="More actions"').classes('sm:!hidden'):
+                    with ui.menu():
+                        if fullscreen:
+                            ui.menu_item('Toggle fullscreen', on_click=lambda: ui.run_javascript('''
+                                if (!document.fullscreenElement) {
+                                    document.documentElement.requestFullscreen();
+                                } else {
+                                    document.exitFullscreen();
+                                }
+                            '''))
+                        if dev:
+                            ui.menu_item('Inspector', on_click=lambda: ui.navigate.to('/inspector'))
+                            ui.menu_item('Logs', on_click=lambda: ui.navigate.to('/logs'))
+
 
     # --- WIDGET GRID ---
-    grid_container = ui.element("div").classes("w-full p-4")
+    grid_container = ui.element("div").classes("dashboard-container w-full p-4")
 
     def rebuild_grid():
         nonlocal active_widgets
@@ -460,7 +476,7 @@ async def main_page(client: Client, request: Request):
         active_widgets.clear()
         with grid_container:
             with ui.grid().classes(
-                "w-full grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
+                "dashboard-grid w-full grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
             ):
                 page_widgets = create_widgets_from_config()
                 grid_widgets = layout.build_interface(
