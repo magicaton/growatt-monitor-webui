@@ -108,6 +108,19 @@ To remove the task:
 .\TaskManager.ps1 -Delete
 ```
 
+Creation verifies the registered executable, arguments, working directory, user and
+startup trigger before reporting success. The task retries failed runs up to five
+times at two-minute intervals. `-Delete` stops a running task before removing it.
+Creation and deletion wait for the detached worker's result; restart requests are
+dispatched asynchronously, with worker errors recorded in `TaskManager.log`.
+
+Task manager regression checks (use mocked scheduler commands, without changing
+real scheduled tasks):
+
+```powershell
+powershell.exe -NoProfile -File tests\TaskManager.Tests.ps1
+```
+
 ## License
 
 Zero-Clause BSD
