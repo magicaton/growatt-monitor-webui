@@ -131,6 +131,8 @@ def read_chunk_sync(ser, slave_id, start_addr, count):
     except serial.SerialException:
         raise
     except Exception:
+        if ser is not None and not ser.is_open:
+            return None  # Port closed under us (shutdown)
         logging.exception(
             "Modbus read error for reg %d (x%d)", start_addr, count
         )

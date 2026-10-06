@@ -257,6 +257,8 @@ async def background_worker():
             if is_auto:
                 if detected_port is None:
                     detected_port = await run.io_bound(auto_detect_com_port, conf.baudrate, conf.slave_id)
+                    if not state.is_running:
+                        break
                 if not detected_port:
                     open_failures += 1
                     log = logging.warning if open_failures == 1 else logging.debug
@@ -308,6 +310,8 @@ async def background_worker():
 
         ser = state.serial_obj
         for start, count in chunks_to_read:
+            if not state.is_running:
+                break
             try:
                 vals = await run.io_bound(
                     read_chunk_sync, ser, conf.slave_id, start, count
@@ -334,6 +338,8 @@ async def background_worker():
                         state.latest_data[start + i] = val
                         state.last_update[start + i] = now
 
+        if not state.is_running:
+            break
         await asyncio.sleep(conf.update_interval)
 
 async def zombie_cleanup_task():
