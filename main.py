@@ -242,8 +242,11 @@ async def background_worker():
                     logging.info("No active clients, closing serial port")
                     state.serial_obj.close()
                     state.serial_obj = None
-                    state.latest_data.clear()
-                    state.last_update.clear()
+                state.latest_data.clear()
+                state.last_update.clear()
+            # Next outage after clients return is logged as a warning again
+            open_failures = 0
+            port_errors = 0
             await asyncio.sleep(1)
             continue
 
@@ -274,9 +277,6 @@ async def background_worker():
                 await asyncio.sleep(5)
                 continue
 
-            if not state.is_running:
-                ser.close()
-                continue
             with state_lock:
                 state.serial_obj = ser
             log = logging.info if port_errors <= 1 else logging.debug  # quiet if it keeps failing
@@ -321,7 +321,8 @@ async def background_worker():
                     log("Serial port error: %s - closing port, will reopen", e)
                 close_serial_port(ser)
                 # Back off if the port keeps failing right after reopening
-                await asyncio.sleep(min(5 * max(port_errors - 1, 0), 30))
+                if state.is_running:
+                    await asyncio.sleep(min(5 * max(port_errors - 1, 0), 30))
                 break
             if vals is None:
                 logging.debug("No data for chunk start_addr=%s count=%s", start, count)
