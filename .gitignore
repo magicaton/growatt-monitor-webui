@@ -6,6 +6,7 @@ dashboard.yaml
 
 # Logs
 *.log
+*.log.*
 
 # Virtual environment directories
 venv/

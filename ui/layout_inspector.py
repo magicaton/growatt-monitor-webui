@@ -1,10 +1,10 @@
 from nicegui import ui, Client
 
 from core.dashboard_config import get_config
-from ui.layout import get_secondary_page_css
+from ui.layout import get_secondary_page_css, decode_register
 
 
-def create_inspector_page(client: Client, state) -> None:
+def create_inspector_page(client: Client, state, get_fresh_data) -> None:
     # Auto dark mode
     ui.add_css(':root { color-scheme: light dark; }')
     ui.add_css(get_secondary_page_css())
@@ -116,31 +116,41 @@ def create_inspector_page(client: Client, state) -> None:
         build_table()
         
         def update_inspector_view():
-            current_data = state.latest_data
+            current_data = get_fresh_data()
             
             for addr, cells in ui_cells.items():
-                if addr in current_data:
-                    raw_val = current_data[addr]
+                if addr not in current_data:
+                    # Not read yet, or stale (failed reads / port closed)
+                    if cells['raw'].text != "---":
+                        for key in ('raw', 'x01', 'x001', 'named'):
+                            if cells[key]:
+                                cells[key].set_text("---")
+                    continue
+
+                raw_val = current_data[addr]
+                
+                cells['raw'].set_text(str(raw_val))
+                
+                cells['x01'].set_text(f"{raw_val * 0.1:.1f}")
+                
+                cells['x001'].set_text(f"{raw_val * 0.01:.2f}")
+                
+                meta = cells['meta']
+                if meta and cells['named']:
+                    scale = meta.get('scale', 1)
+                    val = decode_register(current_data, addr, meta)
+                    if val is None:  # 32-bit value whose high word is missing
+                        cells['named'].set_text("---")
+                        continue
+                    unit = meta.get('unit', '')
                     
-                    cells['raw'].set_text(str(raw_val))
-                    
-                    cells['x01'].set_text(f"{raw_val * 0.1:.1f}")
-                    
-                    cells['x001'].set_text(f"{raw_val * 0.01:.2f}")
-                    
-                    meta = cells['meta']
-                    if meta and cells['named']:
-                        scale = meta.get('scale', 1)
-                        val = raw_val * scale
-                        unit = meta.get('unit', '')
+                    if scale == 1:
+                        val_str = f"{int(val)} {unit}"
+                    elif scale == 0.01:
+                        val_str = f"{val:.2f} {unit}"
+                    else:
+                        val_str = f"{val:.1f} {unit}"
                         
-                        if scale == 1:
-                            val_str = f"{int(val)} {unit}"
-                        elif scale == 0.01:
-                            val_str = f"{val:.2f} {unit}"
-                        else:
-                            val_str = f"{val:.1f} {unit}"
-                            
-                        cells['named'].set_text(val_str.strip())
+                    cells['named'].set_text(val_str.strip())
         
         ui.timer(1.0, update_inspector_view)

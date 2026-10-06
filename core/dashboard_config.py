@@ -45,6 +45,10 @@ class DashboardConfig:
 # Module-level singleton
 _config: DashboardConfig | None = None
 
+# Optional per-register keys besides name/unit/scale:
+# decimals (fixed decimal places), hi_reg_id (high word of a 32-bit value), signed
+_EXTRA_META_KEYS = ("decimals", "hi_reg_id", "signed")
+
 
 def load_dashboard_config(path: str) -> DashboardConfig:
     global _config
@@ -53,9 +57,11 @@ def load_dashboard_config(path: str) -> DashboardConfig:
         raise FileNotFoundError(f"Dashboard config not found: {path}")
 
     with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"Dashboard config must be a mapping: {path}")
     
-    card_definitions: list[dict] = data.get("widgets", [])
+    card_definitions: list[dict] = data.get("widgets") or []
     metadata: dict[int, dict] = {}
     required_ids: set[int] = set()
     
@@ -74,11 +80,14 @@ def load_dashboard_config(path: str) -> DashboardConfig:
                 meta["unit"] = widget_def["unit"]
             if "scale" in widget_def:
                 meta["scale"] = widget_def["scale"]
+            for key in _EXTRA_META_KEYS:
+                if key in widget_def:
+                    meta[key] = widget_def[key]
 
             if meta:
                 metadata[reg_id] = meta
     
-    for reg_def in data.get("registers", []):
+    for reg_def in data.get("registers") or []:
         reg_id = reg_def.get("reg_id")
         if reg_id is None:
             logging.warning("Register without 'reg_id', skipping: %s", reg_def)
@@ -91,8 +100,17 @@ def load_dashboard_config(path: str) -> DashboardConfig:
             meta["unit"] = reg_def["unit"]
         if "scale" in reg_def:
             meta["scale"] = reg_def["scale"]
+        for key in _EXTRA_META_KEYS:
+            if key in reg_def:
+                meta[key] = reg_def[key]
         
         metadata[reg_id] = meta
+
+    # 32-bit registers: also poll the high word of every required register
+    for reg_id in list(required_ids):
+        hi = metadata.get(reg_id, {}).get("hi_reg_id")
+        if isinstance(hi, int):
+            required_ids.add(hi)
     
     # Create the dashboard config singleton
     _config = DashboardConfig(
@@ -120,10 +138,14 @@ def _extract_widget_reg_ids(widget_def: dict) -> set[int]:
     if "variables" in widget_def:
         ids.update(widget_def["variables"])
     
-    # Wildcard *_id fields (e.g. solar_w_id, batt_v_id in EnergyStackWidget)
+    # Wildcard *_id fields (e.g. solar_w_id, batt_v_id in EnergyStackWidget),
+    # either a single register or a list of registers
     for key, value in widget_def.items():
-        if key.endswith("_id") and key != "reg_id" and isinstance(value, int):
-            ids.add(value)
+        if key.endswith("_id") and key != "reg_id":
+            if isinstance(value, int):
+                ids.add(value)
+            elif isinstance(value, list):
+                ids.update(v for v in value if isinstance(v, int))
     
     return ids
 

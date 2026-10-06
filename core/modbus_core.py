@@ -68,6 +68,9 @@ def calculate_crc(data):
                 crc >>= 1
     return struct.pack("<H", crc)
 
+# Returns register values, or None on a missing/invalid response.
+# Raises serial.SerialException if the port itself failed (e.g. USB adapter
+# unplugged) so the caller can close and reopen it.
 def read_chunk_sync(ser, slave_id, start_addr, count):
     try:
         if ser is None or not ser.is_open:
@@ -75,6 +78,14 @@ def read_chunk_sync(ser, slave_id, start_addr, count):
         # Modbus RTU request: [slave_id, func=4 (Read Input Registers), start_addr(2B), count(2B), CRC(2B)]
         pdu = struct.pack(">BBHH", slave_id, 4, start_addr, count)
         crc = calculate_crc(pdu)
+        try:
+            # Drop late replies / line noise left from earlier requests; otherwise
+            # every following fixed-length read stays shifted.
+            ser.reset_input_buffer()
+        except serial.SerialException:
+            raise
+        except Exception as e:  # POSIX: termios.error when the device is gone
+            raise serial.SerialException(f"reset_input_buffer failed: {e}") from e
         ser.write(pdu + crc)
         time.sleep(0.15)  # Wait for device to process and respond
         # Response: [slave_id(1B), func(1B), byte_count(1B), data(count*2B), CRC(2B)]
@@ -82,6 +93,13 @@ def read_chunk_sync(ser, slave_id, start_addr, count):
         response = ser.read(expected_len)
         time.sleep(0.05)  # Inter-frame gap before next request
         if len(response) < expected_len:
+            if (len(response) == 5 and response[1] == 0x84
+                    and calculate_crc(response[:3]) == response[3:]):
+                logging.warning(
+                    "Modbus exception code %d for reg %d (x%d)",
+                    response[2], start_addr, count,
+                )
+                return None
             logging.warning(
                 "Short Modbus response for reg %d (x%d): expected %d bytes, got %d",
                 start_addr,
@@ -98,12 +116,20 @@ def read_chunk_sync(ser, slave_id, start_addr, count):
                 start_addr, count, expected_crc.hex(), received_crc.hex(),
             )
             return None
+        if response[0] != slave_id or response[1] != 4 or response[2] != count * 2:
+            logging.warning(
+                "Unexpected Modbus header for reg %d (x%d): %s",
+                start_addr, count, response[:3].hex(),
+            )
+            return None
         data_bytes = response[3:-2]  # Strip header (3B) and CRC (2B)
         values = []
         for i in range(0, len(data_bytes), 2):
             val = int.from_bytes(data_bytes[i : i + 2], byteorder="big")
             values.append(val)
         return values
+    except serial.SerialException:
+        raise
     except Exception:
         logging.exception(
             "Modbus read error for reg %d (x%d)", start_addr, count

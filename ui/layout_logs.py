@@ -281,8 +281,8 @@ def create_logs_page(client, state):
                 conn_container = ui.column().classes("connections-table w-full")
 
         log_handler = state.log_handler
-        # Sliding window into log_handler.log_buffer:
-        # [start_index .. start_index+len(elements)] = visible DOM range.
+        # Sliding window into log_handler.log_buffer, by entry "seq" (not position):
+        # [start_raw_index .. end_raw_index) = visible DOM range.
         # loading_older: concurrency lock for both load_older/load_newer.
         # loaded_at_top/bottom: one-shot flags to avoid repeated loads at edges.
         # initial_scroll_done: suppresses scroll-to-bottom button flash on page load.
@@ -334,14 +334,15 @@ def create_logs_page(client, state):
                         view_state.end_raw_index = view_state.elements[-1][0] + 1
 
         async def load_older_logs():
-            if not log_handler or view_state.start_raw_index <= 0:
+            if not log_handler or view_state.start_raw_index <= log_handler.first_seq:
                 return
             if view_state.loading_older:
                 return
             
             view_state.loading_older = True
             try:
-                load_count = min(LOAD_BATCH_SIZE, view_state.start_raw_index)
+                available = view_state.start_raw_index - log_handler.first_seq
+                load_count = min(LOAD_BATCH_SIZE, available)
                 new_start = view_state.start_raw_index - load_count
                 
                 entries = log_handler.get_entries(new_start, load_count)
@@ -356,9 +357,9 @@ def create_logs_page(client, state):
                     else:
                         old_height = 0
                     
-                    entries_with_idx = list(enumerate(entries, start=new_start))
+                    entries_with_idx = [(e["seq"], e) for e in entries]
                     render_entries_to_dom(entries_with_idx, prepend=True)
-                    view_state.start_raw_index = new_start
+                    view_state.start_raw_index = entries[0]["seq"]
                     
                     # Restore scroll position
                     if scroll_id and old_height:
@@ -373,7 +374,7 @@ def create_logs_page(client, state):
                             }})()
                         ''')
                     
-                    if view_state.start_raw_index > 0:
+                    if view_state.start_raw_index > log_handler.first_seq:
                         view_state.loaded_at_top = False
             finally:
                 view_state.loading_older = False
@@ -382,8 +383,9 @@ def create_logs_page(client, state):
             if not log_handler:
                 return
             
-            end_index = view_state.end_raw_index
-            total = len(log_handler)
+            # Entries evicted while scrolled up are gone; continue from the oldest kept
+            end_index = max(view_state.end_raw_index, log_handler.first_seq)
+            total = log_handler.next_seq
             
             if end_index >= total:
                 return
@@ -398,11 +400,11 @@ def create_logs_page(client, state):
                 entries = log_handler.get_entries(end_index, load_count)
                 
                 if entries:
-                    entries_with_idx = list(enumerate(entries, start=end_index))
+                    entries_with_idx = [(e["seq"], e) for e in entries]
                     render_entries_to_dom(entries_with_idx, prepend=False)
-                    view_state.end_raw_index = end_index + load_count
+                    view_state.end_raw_index = entries[-1]["seq"] + 1
                     
-                    if view_state.end_raw_index < len(log_handler):
+                    if view_state.end_raw_index < log_handler.next_seq:
                         view_state.loaded_at_bottom = False
             finally:
                 view_state.loading_older = False
@@ -415,13 +417,13 @@ def create_logs_page(client, state):
             view_state.elements.clear()
             pending_logs.clear()
 
-            total = len(log_handler)
+            total = log_handler.next_seq
 
             # Fetch only the last N entries instead of the entire buffer
             fetch_start = max(0, total - MAX_VISIBLE_LOGS * 2)
             recent_entries = log_handler.get_entries(fetch_start, total - fetch_start)
 
-            filtered = [(fetch_start + i, e) for i, e in enumerate(recent_entries) if passes_filter(e)]
+            filtered = [(e["seq"], e) for e in recent_entries if passes_filter(e)]
 
             display = filtered[-MAX_VISIBLE_LOGS:]
 
@@ -439,6 +441,7 @@ def create_logs_page(client, state):
                     view_state.elements.append((i, el))
 
             view_state.auto_scroll = True
+            view_state.initial_scroll_done = False
             ui.timer(0.1, lambda: log_scroll.scroll_to(percent=1.0), once=True)
 
         def handle_new_log(entry: dict):
@@ -449,26 +452,22 @@ def create_logs_page(client, state):
 
         def process_pending_logs():
             if not client.has_socket_connection:
-                pending_logs.clear()
-                return
+                return  # keep queued entries across a transient reconnect (on_delete cleans up)
 
             if not pending_logs:
                 return
 
             try:
                 rendered_any = False
-                total_now = len(log_handler) if log_handler else 0
-                view_state.total_in_buffer = total_now
-                num_pending = len(pending_logs)
-                
-                expected_start_idx = total_now - num_pending
-                is_at_bottom = (view_state.end_raw_index >= expected_start_idx)
+                view_state.total_in_buffer = len(log_handler) if log_handler else 0
+
+                # View is at the live tail if it already reaches the first pending entry
+                is_at_bottom = (view_state.end_raw_index >= pending_logs[0]["seq"])
 
                 while pending_logs:
                     entry = pending_logs.popleft()
 
-                    raw_idx = expected_start_idx
-                    expected_start_idx += 1
+                    raw_idx = entry["seq"]
 
                     if not is_at_bottom:
                         continue
@@ -541,15 +540,19 @@ def create_logs_page(client, state):
                 if distance_from_bottom > SCROLL_LOAD_THRESHOLD + 200:
                     view_state.loaded_at_bottom = False
                 
+                # No edge loading until the scroll-to-bottom after reload_logs has landed
+                if not view_state.initial_scroll_done:
+                    return
+
                 # Load older logs near top
-                if scroll_top < SCROLL_LOAD_THRESHOLD and view_state.start_raw_index > 0:
+                if scroll_top < SCROLL_LOAD_THRESHOLD and view_state.start_raw_index > log_handler.first_seq:
                     if not view_state.loaded_at_top:
                         view_state.loaded_at_top = True
                         await load_older_logs()
                 
                 # Load newer logs near bottom
                 end_index = view_state.end_raw_index
-                total = len(log_handler) if log_handler else 0
+                total = log_handler.next_seq if log_handler else 0
                 if distance_from_bottom < SCROLL_LOAD_THRESHOLD and end_index < total:
                     if not view_state.loaded_at_bottom:
                         view_state.loaded_at_bottom = True
@@ -565,9 +568,9 @@ def create_logs_page(client, state):
         
         if log_handler:
             view_state.total_in_buffer = len(log_handler)
-            reload_logs()
-
+            # Listen before the snapshot: overlap is skipped by seq, nothing is missed
             listener_id = log_handler.add_listener(handle_new_log)
+            reload_logs()
 
             scroll_timer = ui.timer(0.3, handle_scroll_check)
             log_process_timer = ui.timer(0.15, process_pending_logs)
@@ -658,4 +661,5 @@ def create_logs_page(client, state):
                 log_process_timer.deactivate()
                 log_handler.remove_listener(listener_id)
 
-            client.on_disconnect(cleanup_listener)
+            # on_disconnect also fires on transient reconnects; on_delete means the client is gone
+            client.on_delete(cleanup_listener)

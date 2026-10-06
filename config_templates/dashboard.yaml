@@ -1,11 +1,16 @@
 # Dashboard Configuration
+#
+# Register map: Growatt SPF 6000 ES Plus (Modbus input registers).
+# Powers are 32-bit values split over two registers: reg_id is the low word,
+# hi_reg_id the high word (without it, values above 6553.5 W wrap around).
+# Optional keys per register: decimals (fixed decimal places), signed (two's complement).
 
 widgets:
 
   # Energy Flow Stack
   - type: EnergyStackWidget
     title: Load Source
-    solar_w_id: 6
+    solar_w_id: [4, 6]   # PV1 + PV2
     grid_w_id: 37
     batt_v_id: 17
     batt_dis_i_id: 84
@@ -23,16 +28,30 @@ widgets:
   - {type: RegisterCard, reg_id: 20, title: Grid Voltage, unit: V, scale: 0.1}
   
   # Grid Power
-  - {type: RegisterCard, reg_id: 37, title: Grid Power, unit: W, scale: 0.1}
+  - {type: RegisterCard, reg_id: 37, hi_reg_id: 36, title: Grid Power, unit: W, scale: 0.1}
   
   # Grid Frequency
   - {type: RegisterCard, reg_id: 21, title: Grid Frequency, unit: Hz, scale: 0.01}
   
-  # Solar Voltage
-  - {type: RegisterCard, reg_id: 2, title: Solar Voltage, unit: V, scale: 0.1}
-  
-  # Solar Power
-  - {type: RegisterCard, reg_id: 6, title: Solar Power, unit: W, scale: 0.1}
+  # Solar Power (PV1 + PV2, calculated)
+  - type: MathCard
+    title: Solar Power
+    variables: [4, 6]
+    formula: "v[4] + v[6]"
+    unit: W
+    decimals: 1
+
+  # PV1 Voltage
+  - {type: RegisterCard, reg_id: 1, title: PV1 Voltage, unit: V, scale: 0.1}
+
+  # PV1 Power
+  - {type: RegisterCard, reg_id: 4, hi_reg_id: 3, title: PV1 Power, unit: W, scale: 0.1}
+
+  # PV2 Voltage
+  - {type: RegisterCard, reg_id: 2, title: PV2 Voltage, unit: V, scale: 0.1}
+
+  # PV2 Power
+  - {type: RegisterCard, reg_id: 6, hi_reg_id: 5, title: PV2 Power, unit: W, scale: 0.1}
   
   # Battery Voltage
   - {type: RegisterCard, reg_id: 17, title: Battery Voltage, unit: V, scale: 0.01}
@@ -44,6 +63,7 @@ widgets:
     formula: "v[83] - v[84]"
     unit: A
     scale: 1.0
+    decimals: 1
     star: true
   
   # Battery Charge Power (calculated)
@@ -61,10 +81,10 @@ widgets:
   - {type: RegisterCard, reg_id: 34, title: Output Current, unit: A, scale: 0.1}
   
   # Load Power
-  - {type: RegisterCard, reg_id: 10, title: Load Power, name: "Load Power (Active)", unit: W, scale: 0.1, star: true}
+  - {type: RegisterCard, reg_id: 10, hi_reg_id: 9, title: Load Power, name: "Load Power (Active)", unit: W, scale: 0.1, star: true}
   
   # Load Power (Apparent)
-  - {type: RegisterCard, reg_id: 12, title: "Load Power (Appr.)", unit: VA, scale: 0.1}
+  - {type: RegisterCard, reg_id: 12, hi_reg_id: 11, title: "Load Power (Appr.)", unit: VA, scale: 0.1}
   
   # Output Frequency
   - {type: RegisterCard, reg_id: 23, title: Output Frequency, unit: Hz, scale: 0.01}

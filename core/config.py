@@ -35,17 +35,19 @@ class Config:
         if not os.path.exists(path):
             raise FileNotFoundError(f"Config file not found: {path}")
         with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+            data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            raise ValueError(f"Config file must be a mapping: {path}")
 
         if "logging" in data:
-            log_cfg = data["logging"]
+            log_cfg = data["logging"] or {}
             if "console_level" in log_cfg:
                 self.console_log_level = self._parse_log_level(log_cfg["console_level"])
             if "file_level" in log_cfg:
                 self.file_log_level = self._parse_log_level(log_cfg["file_level"])
 
         if "server" in data:
-            server_cfg = data["server"]
+            server_cfg = data["server"] or {}
             if "host" in server_cfg:
                 self.server_host = server_cfg["host"]
             if "port" in server_cfg:
@@ -54,7 +56,7 @@ class Config:
                 self.storage_secret = str(server_cfg["storage_secret"])
 
         if "modbus" in data:
-            mb_cfg = data["modbus"]
+            mb_cfg = data["modbus"] or {}
             if "com_port" in mb_cfg:
                 self.com_port = mb_cfg["com_port"]
             if "baudrate" in mb_cfg:
@@ -69,14 +71,14 @@ class Config:
                 self.opt_max_gap = int(mb_cfg["opt_max_gap"])
 
         if "ui" in data:
-            ui_cfg = data["ui"]
+            ui_cfg = data["ui"] or {}
             if "show_fs_btn" in ui_cfg:
                 self.show_fs_btn = bool(ui_cfg["show_fs_btn"])
             if "show_dev_btns" in ui_cfg:
                 self.show_dev_btns = bool(ui_cfg["show_dev_btns"])
 
         if "inspector" in data:
-            insp_cfg = data["inspector"]
+            insp_cfg = data["inspector"] or {}
             if "inspector_chunks" in insp_cfg:
                 self.inspector_chunks = [
                     (int(c[0]), int(c[1])) for c in insp_cfg["inspector_chunks"]

@@ -3,21 +3,44 @@ from abc import ABC, abstractmethod
 from typing import Callable
 from nicegui import ui
 
+MISSING_TEXT = "—"  # shown when a value that was displayed is no longer fresh
+
+
+def decode_register(snapshot: dict[int, int], reg_id: int | None, meta: dict | None) -> float | None:
+    # Scaled value of reg_id, or None if any needed word is missing.
+    # Optional meta: hi_reg_id (32-bit value, high word at that address), signed (two's complement).
+    if reg_id is None or reg_id not in snapshot:
+        return None
+    meta = meta or {}
+    raw = snapshot[reg_id]
+    bits = 16
+    hi = meta.get('hi_reg_id')
+    if hi is not None:
+        if hi not in snapshot:
+            return None
+        raw = (snapshot[hi] << 16) | raw
+        bits = 32
+    if meta.get('signed') and raw >= 1 << (bits - 1):
+        raw -= 1 << bits
+    return raw * meta.get('scale', 1)
+
+
 class BaseWidget(ABC):
     def __init__(self, meta_map: dict[int, dict] | None = None):
         self.meta_map = meta_map or {}
 
-    def get_scaled_value(self, snapshot: dict[int, int], reg_id: int | None) -> float:
-        if reg_id is None or reg_id not in snapshot:
-            return 0.0
-
-        raw = snapshot[reg_id]
-        meta = self.meta_map.get(reg_id, {})
-        scale = meta.get('scale', 1)
-        return raw * scale
+    def get_value(self, snapshot: dict[int, int], reg_id: int | None) -> float | None:
+        if reg_id is None:
+            return None
+        return decode_register(snapshot, reg_id, self.meta_map.get(reg_id))
 
     @staticmethod
-    def format_value(val: float, unit: str = '', scale: float = 1.0) -> str:
+    def format_value(val: float, unit: str = '', scale: float = 1.0, decimals: int | None = None) -> str:
+        if decimals is not None:
+            text = f"{val:.{decimals}f}"
+            if float(text) == 0:
+                text = f"{0.0:.{decimals}f}"  # avoid "-0.0"
+            return f"{text} {unit}" if unit else text
         if unit == '':
             return f"{int(val)}"
         elif scale == 0.01:
@@ -70,15 +93,22 @@ class RegisterCard(BaseWidget):
             )
     
     def update(self, snapshot: dict[int, int]) -> None:
-        if self.reg_id not in snapshot or self.label is None:
+        if self.label is None:
             return
         
-        val = self.get_scaled_value(snapshot, self.reg_id)
+        val = self.get_value(snapshot, self.reg_id)
+        if val is None:
+            # Keep "..." until the first value; afterwards mark it as missing/stale
+            if self.label.text not in ("...", MISSING_TEXT):
+                self.label.set_text(MISSING_TEXT)
+                if self.fill and self.card:
+                    self.card.style('--fill-pct: 0%')
+            return
         meta = self.meta_map.get(self.reg_id, {})
         scale = meta.get('scale', 1)
         unit = meta.get("unit", "")
 
-        self.label.set_text(self.format_value(val, unit, scale))
+        self.label.set_text(self.format_value(val, unit, scale, meta.get('decimals')))
         
 
         if self.fill and self.card:
@@ -152,15 +182,20 @@ class StripCard(RegisterCard):
                 ).style('width: 0%')
     
     def update(self, snapshot: dict[int, int]) -> None:
-        if self.reg_id not in snapshot or self.bar is None or self.val_label is None:
+        if self.bar is None or self.val_label is None:
             return
         
-        val = self.get_scaled_value(snapshot, self.reg_id)
+        val = self.get_value(snapshot, self.reg_id)
+        if val is None:
+            if self.val_label.text not in ("...", MISSING_TEXT):
+                self.val_label.set_text(MISSING_TEXT)
+                self.bar.style('width: 0%')
+            return
         meta = self.meta_map.get(self.reg_id, {})
         scale = meta.get('scale', 1)
         unit = meta.get('unit', '')
 
-        self.val_label.set_text(self.format_value(val, unit, scale))
+        self.val_label.set_text(self.format_value(val, unit, scale, meta.get('decimals')))
         
         # Update bar
         pct = max(0.0, min(100.0, val))
@@ -192,6 +227,7 @@ class MathCard(BaseWidget):
         unit: str = '',
         scale: float = 1.0,
         star: bool = False,
+        decimals: int | None = None,
     ):
         super().__init__(meta_map)
         self.title = title
@@ -199,6 +235,7 @@ class MathCard(BaseWidget):
         self.formula = formula  # Lambda: (var_dict) -> result
         self.unit = unit
         self.scale = scale
+        self.decimals = decimals
         self.star = star
         
         self.card = None
@@ -223,11 +260,16 @@ class MathCard(BaseWidget):
         try:
             var_dict = {}
             for reg_id in self.variables:
-                var_dict[reg_id] = self.get_scaled_value(snapshot, reg_id)
+                val = self.get_value(snapshot, reg_id)
+                if val is None:  # Missing or stale input: don't compute from zeros
+                    if self.label.text not in ("...", MISSING_TEXT):
+                        self.label.set_text(MISSING_TEXT)
+                    return
+                var_dict[reg_id] = val
             
             result = self.formula(var_dict) * self.scale
 
-            self.label.set_text(self.format_value(result, self.unit, self.scale))
+            self.label.set_text(self.format_value(result, self.unit, self.scale, self.decimals))
         except Exception:
             logging.debug("MathCard '%s' formula error", self.title, exc_info=True)
             self.label.set_text("Err")
@@ -239,7 +281,7 @@ class EnergyStackWidget(BaseWidget):
         self,
         meta_map: dict[int, dict],
         title: str = 'Load Source',
-        solar_w_id: int | None = None,
+        solar_w_id: int | list[int] | None = None,  # list: summed (e.g. PV1 + PV2)
         grid_w_id: int | None = None,
         batt_v_id: int | None = None,
         batt_dis_i_id: int | None = None,
@@ -247,7 +289,12 @@ class EnergyStackWidget(BaseWidget):
     ):
         super().__init__(meta_map)
         self.title = title
-        self.solar_w_id = solar_w_id
+        if solar_w_id is None:
+            self.solar_w_ids = []
+        elif isinstance(solar_w_id, list):
+            self.solar_w_ids = solar_w_id
+        else:
+            self.solar_w_ids = [solar_w_id]
         self.grid_w_id = grid_w_id
         self.batt_v_id = batt_v_id
         self.batt_dis_i_id = batt_dis_i_id
@@ -256,6 +303,7 @@ class EnergyStackWidget(BaseWidget):
         self.card = None
         self.bars = {}
         self.labels = {}
+        self.has_data = False
     
     def build(self) -> None:
         self.card = ui.card().classes(
@@ -310,13 +358,24 @@ class EnergyStackWidget(BaseWidget):
             )
     
     def update(self, snapshot: dict[int, int]) -> None:
+        ids = self.solar_w_ids + [self.grid_w_id, self.batt_v_id, self.batt_dis_i_id]
+        values = {i: self.get_value(snapshot, i) for i in ids if i is not None}
+        if any(v is None for v in values.values()):
+            # Missing or stale input: a partial split would be misleading
+            if self.has_data:
+                self.has_data = False
+                for key in ('sol', 'grid', 'batt'):
+                    self.bars[key].style('width: 0%')
+                    self.labels[key].set_text('')
+                self.labels['total'].set_text(f"Total Load: {MISSING_TEXT}")
+            return
         try:
-            p_sol = self.get_scaled_value(snapshot, self.solar_w_id)
+            p_sol = sum(values[i] for i in self.solar_w_ids)
             
-            p_grid = self.get_scaled_value(snapshot, self.grid_w_id)
+            p_grid = values.get(self.grid_w_id, 0.0)
             
-            v_batt = self.get_scaled_value(snapshot, self.batt_v_id)
-            i_batt = self.get_scaled_value(snapshot, self.batt_dis_i_id)
+            v_batt = values.get(self.batt_v_id, 0.0)
+            i_batt = values.get(self.batt_dis_i_id, 0.0)
             p_batt = v_batt * i_batt
             
             p_sol = max(0.0, p_sol)
@@ -341,6 +400,7 @@ class EnergyStackWidget(BaseWidget):
             self.labels['batt'].set_text(f"{int(p_batt)}W" if pct_batt > 10 else "")
             
             self.labels['total'].set_text(f"Total Load: {int(total_watts)} W")
+            self.has_data = True
         
         except Exception:
             logging.debug("EnergyStackWidget '%s' calc error", self.title, exc_info=True)

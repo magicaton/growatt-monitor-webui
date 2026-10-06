@@ -59,7 +59,21 @@ cp config_templates\dashboard.yaml dashboard.yaml
 
 Defines which registers to display and how. Widget types: `RegisterCard`, `StripCard`, `MathCard`, `EnergyStackWidget`.
 
-The default template includes register mappings for the **Growatt SPF 6000 ES Plus**. For other inverter models, you can use the `/inspector` page to explore raw register values — set the desired address ranges in `inspector_chunks` and determine the correct mapping experimentally, or look up the Modbus register map for your model online.
+The default template includes register mappings for the **Growatt SPF 6000 ES Plus** (both PV inputs). For other inverter models, you can use the `/inspector` page to explore raw register values — set the desired address ranges in `inspector_chunks` and determine the correct mapping experimentally, or look up the Modbus register map for your model online.
+
+Optional per-register keys (on a widget with `reg_id`, or in the `registers:` section):
+
+| Key         | Description                                                                 |
+|-------------|-----------------------------------------------------------------------------|
+| `hi_reg_id` | High word of a 32-bit value (`reg_id` is the low word). Growatt stores powers this way; without it values above 6553.5 W (at `scale: 0.1`) wrap around |
+| `signed`    | Decode as a two's complement (signed) value                                 |
+| `decimals`  | Fixed number of decimal places (also accepted by `MathCard`)               |
+
+`EnergyStackWidget` accepts a list for `solar_w_id` (e.g. `[4, 6]` for PV1 + PV2); the values are summed.
+
+Values that have not been refreshed for `max(10, 3 × update_interval)` seconds (failed reads, lost connection) are shown as `—` on the dashboard and `---` in the Inspector.
+
+> **Note:** `dashboard.yaml` is your own copy of the template. After updating the project, compare it with `config_templates/dashboard.yaml` to pick up template changes.
 
 ## Usage
 
@@ -68,6 +82,8 @@ python main.py
 ```
 
 Open `http://localhost:8080` (or the configured host/port).
+
+The log file `growatt_monitor_webui.log` is rotated at 5 MB, keeping 3 backups (`.log.1` … `.log.3`).
 
 ### Pages
 
@@ -119,6 +135,13 @@ real scheduled tasks):
 
 ```powershell
 powershell.exe -NoProfile -File tests\TaskManager.Tests.ps1
+```
+
+## Tests
+
+```powershell
+pip install -r requirements-dev.txt
+python -m pytest tests
 ```
 
 ## License

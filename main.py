@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import shutil
 import asyncio
 import logging
@@ -12,7 +13,7 @@ from typing import Any
 
 import serial
 
-from nicegui import ui, app, run, Client
+from nicegui import ui, app, run, Client, background_tasks
 from fastapi import Request
 from fastapi.responses import PlainTextResponse
 from datetime import datetime
@@ -44,6 +45,7 @@ class AppState:
     inspector_clients_count: int = 0
     clients_count: int = 0
     latest_data: dict[int, int] = field(default_factory=dict)
+    last_update: dict[int, float] = field(default_factory=dict)  # reg -> time.monotonic() of last good read
     serial_obj: Any = None
     is_running: bool = True
     cleanup_done: bool = False
@@ -158,10 +160,8 @@ def unregister_client(client_id):
             )
 
 def setup_heartbeat(client, page_name, request):
-    timer_active = True
-
     async def heartbeat():
-        if not timer_active or not client.has_socket_connection:
+        if not client.has_socket_connection:
             return
         try:
             await client.run_javascript("true", timeout=1.5)
@@ -171,20 +171,19 @@ def setup_heartbeat(client, page_name, request):
 
     heartbeat_timer = ui.timer(2.0, heartbeat)
 
-    def on_disconnect():
-        nonlocal timer_active
-        timer_active = False
-        heartbeat_timer.deactivate()
-
+    # NiceGUI 3.x fires on_disconnect on every socket drop, including transient
+    # ones where the same client reconnects within reconnect_timeout. Only
+    # on_delete means the client is really gone (its timers are cancelled then).
+    def on_delete():
         # Delayed removal: if this is a Wi-Fi change, JS will reload the page
         # and create a new client before this old one is removed.
         async def delayed_unregister():
             await asyncio.sleep(15.0)
             unregister_client(client.id)
 
-        asyncio.create_task(delayed_unregister())
+        background_tasks.create(delayed_unregister(), name=f"unregister {client.id}")
 
-    client.on_disconnect(on_disconnect)
+    client.on_delete(on_delete)
     return heartbeat_timer
 
 
@@ -207,8 +206,33 @@ def cleanup_resources():
 
 
 # --- BACKGROUND WORKER ---
+def close_serial_port(ser) -> None:
+    # Forget and close `ser` after a port error. No-op if cleanup already took it.
+    with state_lock:
+        if state.serial_obj is ser:
+            state.serial_obj = None
+    try:
+        ser.close()
+    except Exception:
+        logging.debug("Error closing serial port", exc_info=True)
+
+
+def get_fresh_data() -> dict[int, int]:
+    # Values not refreshed recently (failed reads, lost port) count as missing
+    max_age = max(10.0, 3 * conf.update_interval)
+    now = time.monotonic()
+    with state_lock:
+        return {
+            reg: val for reg, val in state.latest_data.items()
+            if now - state.last_update.get(reg, float("-inf")) <= max_age
+        }
+
+
 async def background_worker():
     logging.info("Background worker started")
+    detected_port = None  # conf.com_port stays "auto", so a renumbered port is re-detected
+    open_failures = 0  # Repeated failures are logged at DEBUG to keep the log small
+    port_errors = 0
     while state.is_running:
         # No clients -> close port and sleep
         total_clients = state.dashboard_clients_count + state.inspector_clients_count
@@ -219,37 +243,45 @@ async def background_worker():
                     state.serial_obj.close()
                     state.serial_obj = None
                     state.latest_data.clear()
+                    state.last_update.clear()
             await asyncio.sleep(1)
             continue
 
         # Open port if needed
         if state.serial_obj is None:
-            try:
-                target_port = conf.com_port
-                if target_port.lower() == "auto":
-                    detected = await run.io_bound(auto_detect_com_port, conf.baudrate, conf.slave_id)
-                    if detected:
-                        target_port = detected
-                        conf.com_port = detected  # Save to avoid re-scanning
-                    else:
-                        logging.warning("Auto COM port detection failed, retrying in 5s")
-                        await asyncio.sleep(5)
-                        continue
+            is_auto = conf.com_port.lower() == "auto"
+            target_port = conf.com_port
+            if is_auto:
+                if detected_port is None:
+                    detected_port = await run.io_bound(auto_detect_com_port, conf.baudrate, conf.slave_id)
+                if not detected_port:
+                    open_failures += 1
+                    log = logging.warning if open_failures == 1 else logging.debug
+                    log("Auto COM port detection failed, retrying in 5s")
+                    await asyncio.sleep(5)
+                    continue
+                target_port = detected_port
 
+            try:
                 logging.debug("Opening port %s", target_port)
                 ser = serial.Serial(target_port, conf.baudrate, timeout=1.0)
-                ser.reset_input_buffer()
-
-                if state.is_running:
-                    with state_lock:
-                        state.serial_obj = ser
-                    logging.info("Port %s opened (baud=%d)", target_port, conf.baudrate)
-                else:
-                    ser.close()
-            except Exception:
-                logging.exception("Failed to open port %s", conf.com_port)
+            except Exception as e:
+                open_failures += 1
+                log = logging.warning if open_failures == 1 else logging.debug
+                log("Failed to open port %s: %s (retrying every 5s)", target_port, e)
+                if is_auto:
+                    detected_port = None  # COM number may have changed after replug -> re-detect
                 await asyncio.sleep(5)
                 continue
+
+            if not state.is_running:
+                ser.close()
+                continue
+            with state_lock:
+                state.serial_obj = ser
+            log = logging.info if port_errors <= 1 else logging.debug  # quiet if it keeps failing
+            log("Port %s opened (baud=%d)", target_port, conf.baudrate)
+            open_failures = 0
 
         # Read registers using appropriate chunks for current client mix
         has_dash = state.dashboard_clients_count > 0
@@ -274,16 +306,32 @@ async def background_worker():
             mode_label = "DASHBOARD"
         logging.debug("Reading cycle: Mode=%s, Chunks=%d", mode_label, len(chunks_to_read))
 
+        ser = state.serial_obj
         for start, count in chunks_to_read:
-            vals = await run.io_bound(
-                read_chunk_sync, state.serial_obj, conf.slave_id, start, count
-            )
+            try:
+                vals = await run.io_bound(
+                    read_chunk_sync, ser, conf.slave_id, start, count
+                )
+            except serial.SerialException as e:
+                # The port itself failed (adapter unplugged, handle dead). Bad or
+                # missing replies don't get here - they just return None.
+                if state.is_running:
+                    port_errors += 1
+                    log = logging.warning if port_errors == 1 else logging.debug
+                    log("Serial port error: %s - closing port, will reopen", e)
+                close_serial_port(ser)
+                # Back off if the port keeps failing right after reopening
+                await asyncio.sleep(min(5 * max(port_errors - 1, 0), 30))
+                break
             if vals is None:
                 logging.debug("No data for chunk start_addr=%s count=%s", start, count)
             else:
+                port_errors = 0
+                now = time.monotonic()
                 with state_lock:
                     for i, val in enumerate(vals):
                         state.latest_data[start + i] = val
+                        state.last_update[start + i] = now
 
         await asyncio.sleep(conf.update_interval)
 
@@ -490,15 +538,13 @@ async def main_page(client: Client, request: Request):
         if not client.has_socket_connection:
             return
         try:
-            with state_lock:
-                snapshot = dict(state.latest_data)
+            snapshot = get_fresh_data()
             for widget in active_widgets:
                 widget.update(snapshot)
         except Exception:
             logging.debug("Error updating dashboard widgets", exc_info=True)
 
     dashboard_timer = ui.timer(1.0, update_view)
-    client.on_disconnect(lambda: dashboard_timer.deactivate())
 
     heartbeat_timer = setup_heartbeat(client, "Dashboard", request)
 
@@ -506,7 +552,7 @@ async def main_page(client: Client, request: Request):
 # --- INSPECTOR PAGE ---
 @ui.page("/inspector")
 async def inspector_page(client: Client, request: Request):
-    layout_inspector.create_inspector_page(client, state)
+    layout_inspector.create_inspector_page(client, state, get_fresh_data)
 
     setup_heartbeat(client, "Inspector", request)
 
